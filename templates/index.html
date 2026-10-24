@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mon Itinéraire Python</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { margin: 0; font-family: 'Segoe UI', sans-serif; }
+    #map { height: 100vh; width: 100%; }
+    
+    .controls {
+      position: absolute;
+      top: 20px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      width: 90%; max-width: 400px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .input-row { display: flex; gap: 10px; }
+    input {
+      flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; outline: none;
+    }
+    button {
+      padding: 10px 15px; background: #4285F4; color: white; border: none; border-radius: 5px;
+      cursor: pointer; font-weight: bold;
+    }
+    button:hover { background: #3367D6; }
+    #info { font-size: 14px; color: #333; text-align: center; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <div class="controls">
+    <div class="input-row">
+      <input type="text" id="destination" placeholder="Où allez-vous ? (ex: Paris)" onkeypress="handleKeyPress(event)">
+      <button onclick="calculateRoute()">Go</button>
+    </div>
+    <div id="info">Autorisez la localisation pour commencer.</div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    var map = L.map('map').setView([12.3714, -1.5197], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    var userMarker, destMarker, routeLine;
+    var userLat, userLon;
+
+    // 1. Obtenir la position de l'utilisateur
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(function(position) {
+        userLat = position.coords.latitude;
+        userLon = position.coords.longitude;
+        
+        map.setView([userLat, userLon], 13);
+        
+        userMarker = L.marker([userLat, userLon]).addTo(map)
+          .bindPopup("<b>Vous êtes ici</b>").openPopup();
+          
+        document.getElementById('info').innerText = "Entrez une destination.";
+      }, function() {
+        document.getElementById('info').innerText = "Géolocalisation refusée. Impossible de calculer l'itinéraire.";
+      });
+    } else {
+      document.getElementById('info').innerText = "Votre navigateur ne supporte pas la géolocalisation.";
+    }
+
+    // 2. Envoyer les données au serveur Python pour calculer
+    async function calculateRoute() {
+      const destName = document.getElementById('destination').value;
+      if (!destName) return;
+      
+      if (!userLat || !userLon) {
+        alert("Veuillez d'abord autoriser la géolocalisation.");
+        return;
+      }
+
+      document.getElementById('info').innerText = "Calcul de l'itinéraire...";
+
+      try {
+        const response = await fetch('/api/route', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start_lat: userLat,
+            start_lon: userLon,
+            dest_name: destName
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+          alert(data.error);
+          document.getElementById('info').innerText = "Erreur.";
+          return;
+        }
+
+        // Nettoyer les anciens tracés
+        if (destMarker) map.removeLayer(destMarker);
+        if (routeLine) map.removeLayer(routeLine);
+
+        // Placer le marqueur de destination
+        destMarker = L.marker([data.dest_lat, data.dest_lon]).addTo(map)
+          .bindPopup("<b>Destination</b>");
+
+        // Dessiner le chemin
+        routeLine = L.geoJSON(data.route_geometry, {
+          style: { color: '#4285F4', weight: 6, opacity: 0.8 }
+        }).addTo(map);
+
+        // Ajuster la vue pour voir tout le trajet
+        map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+
+        // Afficher les infos
+        document.getElementById('info').innerText = `Distance : ${data.distance} km | Temps : ${data.duration} min`;
+
+      } catch (error) {
+        alert("Erreur de communication avec le serveur.");
+      }
+    }
+
+    function handleKeyPress(e) {
+      if (e.key === 'Enter') calculateRoute();
+    }
+  </script>
+</body>
+</html>
